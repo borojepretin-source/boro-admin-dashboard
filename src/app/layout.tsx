@@ -20,8 +20,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="id" className={inter.variable}>
-      <body className="bg-[#070714] text-white antialiased">
+    <html lang="id" className={inter.variable} suppressHydrationWarning>
+      <body className="bg-[#070714] text-white antialiased" suppressHydrationWarning>
         <AuthProvider>
           {children}
         </AuthProvider>
