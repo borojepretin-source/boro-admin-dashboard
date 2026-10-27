@@ -1,14 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { watchVouchers, watchTemplates, watchSessions, type Voucher, type Template, type Session } from '@/lib/api';
+import { watchVouchers, watchSessions, type Voucher, type Session } from '@/lib/api';
 
 interface Stats {
-  totalVouchers: number;
   activeVouchers: number;
-  usedVouchers: number;
-  totalTemplates: number;
-  activeTemplates: number;
   todaySessions: number;
   totalSessions: number;
   totalPrinted: number;
@@ -16,9 +12,10 @@ interface Stats {
 
 export default function OverviewTab() {
   const [stats, setStats] = useState<Stats>({
-    totalVouchers: 0, activeVouchers: 0, usedVouchers: 0,
-    totalTemplates: 0, activeTemplates: 0,
-    todaySessions: 0, totalSessions: 0, totalPrinted: 0,
+    activeVouchers: 0,
+    todaySessions: 0,
+    totalSessions: 0,
+    totalPrinted: 0,
   });
   const [recentSessions, setRecentSessions] = useState<Session[]>([]);
 
@@ -29,23 +26,10 @@ export default function OverviewTab() {
       (vouchers: Voucher[]) => {
         setStats(prev => ({
           ...prev,
-          totalVouchers:  vouchers.length,
-          activeVouchers: vouchers.filter(v => !v.is_used).length,
-          usedVouchers:   vouchers.filter(v => v.is_used).length,
+          activeVouchers: vouchers.length,
         }));
       },
       (err) => console.error('[Overview] Vouchers error:', err.message)
-    ));
-
-    unsubs.push(watchTemplates(
-      (templates: Template[]) => {
-        setStats(prev => ({
-          ...prev,
-          totalTemplates:  templates.length,
-          activeTemplates: templates.filter(t => t.active).length,
-        }));
-      },
-      (err) => console.error('[Overview] Templates error:', err.message)
     ));
 
     unsubs.push(watchSessions(
@@ -57,10 +41,10 @@ export default function OverviewTab() {
           ...prev,
           totalSessions: sessions.length,
           todaySessions: sessions.filter(s => {
-            const ms = s.started_at?.toMillis();
-            return ms ? ms >= todayTs : false;
+            const ms = s.started_at?.toMillis ? s.started_at.toMillis() : (s.started_at as any)?.getTime?.() ?? 0;
+            return ms >= todayTs;
           }).length,
-          totalPrinted:  sessions.filter(s => s.printed).length,
+          totalPrinted: sessions.filter(s => s.printed).length,
         }));
         setRecentSessions(sessions.slice(0, 5));
       },
@@ -71,10 +55,10 @@ export default function OverviewTab() {
   }, []);
 
   const statCards = [
-    { label: 'Voucher Aktif',     value: stats.activeVouchers, icon: '🎫', color: '#6C63FF', sub: `${stats.usedVouchers} sudah digunakan` },
-    { label: 'Sesi Hari Ini',     value: stats.todaySessions,  icon: '📸', color: '#4FACFE', sub: `${stats.totalSessions} total sesi` },
-    { label: 'Template Aktif',    value: stats.activeTemplates, icon: '🖼️', color: '#FF6B9D', sub: `${stats.totalTemplates} total template` },
-    { label: 'Foto Dicetak',      value: stats.totalPrinted,   icon: '🖨️', color: '#4ADE80', sub: `dari ${stats.totalSessions} sesi` },
+    { label: 'Voucher Tersedia', value: stats.activeVouchers, icon: '🎫', color: '#6C63FF', sub: 'siap digunakan' },
+    { label: 'Sesi Hari Ini',    value: stats.todaySessions,  icon: '📸', color: '#4FACFE', sub: 'pelanggan hari ini' },
+    { label: 'Total Sesi',        value: stats.totalSessions,  icon: '🗂️', color: '#FF6B9D', sub: 'sesi tersimpan (maks 30 hari)' },
+    { label: 'Foto Dicetak',     value: stats.totalPrinted,   icon: '🖨️', color: '#4ADE80', sub: `dari ${stats.totalSessions} sesi` },
   ];
 
   return (
@@ -84,7 +68,7 @@ export default function OverviewTab() {
           Ikhtisar <span className="gradient-text">Dashboard</span>
         </h1>
         <p style={{ color:'var(--text-muted)', fontSize:'0.875rem' }}>
-          Monitoring real-time Boro Photo Booth
+          Monitoring real-time operasional Boro Photo Booth
         </p>
       </div>
 
@@ -117,45 +101,71 @@ export default function OverviewTab() {
       {/* Recent Sessions */}
       <div className="glass-card" style={{ padding:'1.5rem' }}>
         <h2 style={{ fontSize:'1rem', fontWeight:700, marginBottom:'1.25rem', color:'var(--text-primary)' }}>
-          📋 Sesi Terbaru
+          📋 Sesi Terbaru (Live)
         </h2>
+
         {recentSessions.length === 0 ? (
-          <div style={{ textAlign:'center', padding:'2rem', color:'var(--text-muted)' }}>
-            Belum ada sesi yang tercatat
-          </div>
+          <p style={{ color:'var(--text-muted)', fontSize:'0.875rem', textAlign:'center', padding:'2rem 0' }}>
+            Belum ada sesi hari ini
+          </p>
         ) : (
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Voucher</th>
-                <th>Email</th>
-                <th>Waktu</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentSessions.map(s => (
-                <tr key={s.id}>
-                  <td>
-                    <span style={{ fontFamily:'monospace', fontWeight:700, color:'white', background:'rgba(108,99,255,0.15)', padding:'0.2rem 0.5rem', borderRadius:'6px' }}>
-                      {s.code || s.voucher_code || s.id.slice(0,6)}
-                    </span>
-                  </td>
-                  <td>{s.email || <span style={{color:'var(--text-muted)'}}>—</span>}</td>
-                  <td style={{ fontSize:'0.8rem' }}>
-                    {s.started_at?.toDate
-                      ? s.started_at.toDate().toLocaleString('id-ID', { dateStyle:'short', timeStyle:'short' })
-                      : '—'}
-                  </td>
-                  <td>
-                    <span className={`badge ${s.printed ? 'badge-green' : 'badge-amber'}`}>
-                      {s.printed ? '✓ Dicetak' : '⏳ Pending'}
-                    </span>
-                  </td>
+          <div style={{ overflowX:'auto' }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Foto</th>
+                  <th>Kode Voucher</th>
+                  <th>Waktu</th>
+                  <th>Status</th>
+                  <th>Email</th>
+                  <th>Cetak</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {recentSessions.map((s) => {
+                  const date = s.started_at?.toDate ? s.started_at.toDate() : null;
+                  const timeStr = date ? date.toLocaleTimeString('id-ID', { hour:'2-digit', minute:'2-digit' }) : '—';
+                  return (
+                    <tr key={s.id}>
+                      <td>
+                        {s.photo_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={s.photo_url}
+                            alt="session"
+                            style={{ width:'40px', height:'40px', objectFit:'cover', borderRadius:'6px' }}
+                          />
+                        ) : (
+                          <div style={{ width:'40px', height:'40px', borderRadius:'6px', background:'rgba(255,255,255,0.05)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1rem' }}>
+                            📸
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        <span style={{ fontFamily:'monospace', fontWeight:700, color:'white', background:'rgba(108,99,255,0.15)', padding:'0.2rem 0.5rem', borderRadius:'6px' }}>
+                          {s.code || s.voucher_code || '—'}
+                        </span>
+                      </td>
+                      <td>{timeStr}</td>
+                      <td>
+                        <span className={`badge ${s.status === 'FINISHED' ? 'badge-green' : 'badge-blue'}`}>
+                          {s.status}
+                        </span>
+                      </td>
+                      <td style={{ maxWidth:'160px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {s.email || '—'}
+                      </td>
+                      <td>
+                        <span className={`badge ${s.printed ? 'badge-green' : 'badge-amber'}`}>
+                          {s.printed ? 'Ya' : 'Tidak'}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

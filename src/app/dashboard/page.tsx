@@ -5,21 +5,17 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import OverviewTab from '@/components/tabs/OverviewTab';
 import VouchersTab from '@/components/tabs/VouchersTab';
-import TemplatesTab from '@/components/tabs/TemplatesTab';
 import SessionsTab from '@/components/tabs/SessionsTab';
-import SettingsTab from '@/components/tabs/SettingsTab';
 import DeviceStatusTab from '@/components/tabs/DeviceStatusTab';
-import { watchDeviceStatus, DeviceStatus } from '@/lib/api';
+import { watchDeviceStatus, cleanupOldSessions, DeviceStatus } from '@/lib/api';
 
-type Tab = 'overview' | 'vouchers' | 'templates' | 'sessions' | 'device_status' | 'settings';
+type Tab = 'overview' | 'vouchers' | 'sessions' | 'device_status';
 
 const NAV_ITEMS: { id: Tab; label: string; icon: string }[] = [
   { id: 'overview',       label: 'Ikhtisar',          icon: '📊' },
   { id: 'vouchers',       label: 'Voucher',            icon: '🎫' },
-  { id: 'templates',      label: 'Template',           icon: '🖼️' },
   { id: 'sessions',       label: 'Riwayat Sesi',       icon: '📸' },
   { id: 'device_status',  label: 'Status Perangkat',   icon: '🖥️' },
-  { id: 'settings',       label: 'Pengaturan',         icon: '⚙️' },
 ];
 
 export default function DashboardPage() {
@@ -37,6 +33,23 @@ export default function DashboardPage() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Auto-Cleanup 30 Hari: Berjalan otomatis sekali sehari saat admin membuka dashboard
+  useEffect(() => {
+    if (!user) return;
+    const lastCleanup = localStorage.getItem('boro_last_cleanup');
+    const now = Date.now();
+    const twelveHoursMs = 12 * 60 * 60 * 1000;
+    if (!lastCleanup || now - Number(lastCleanup) > twelveHoursMs) {
+      cleanupOldSessions(30)
+        .then(() => {
+          localStorage.setItem('boro_last_cleanup', String(now));
+        })
+        .catch((err) => {
+          console.warn('[Dashboard] Auto cleanup background notice:', err);
+        });
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!loading && !user) router.replace('/login');
@@ -56,10 +69,8 @@ export default function DashboardPage() {
   const tabComponents: Record<Tab, React.ReactNode> = {
     overview:       <OverviewTab />,
     vouchers:       <VouchersTab />,
-    templates:      <TemplatesTab />,
     sessions:       <SessionsTab />,
     device_status:  <DeviceStatusTab />,
-    settings:       <SettingsTab />,
   };
 
   return (

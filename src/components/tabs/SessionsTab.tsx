@@ -80,7 +80,7 @@ export default function SessionsTab() {
           Riwayat <span className="gradient-text">Sesi Foto</span>
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-          Semua sesi yang telah dilakukan oleh pelanggan
+          Semua sesi pelanggan tersimpan otomatis selama 30 hari (auto-cleanup aktif)
         </p>
       </div>
 

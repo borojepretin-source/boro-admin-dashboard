@@ -503,3 +503,69 @@ export function watchDeviceStatus(
     }
   );
 }
+
+// ─── Auto-Cleanup 30 Hari ──────────────────────────────────────────────────────
+
+/**
+ * Hapus sesi foto dan file di Firebase Storage yang berumur lebih dari 30 hari secara otomatis.
+ * Juga membersihkan voucher lama yang tidak pernah dipakai > 30 hari.
+ */
+export async function cleanupOldSessions(retentionDays = 30): Promise<{ deletedSessions: number; deletedVouchers: number }> {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+  const cutoffTimestamp = Timestamp.fromDate(cutoffDate);
+
+  console.log(`[Auto-Cleanup] Mulai membersihkan data lebih dari ${retentionDays} hari (sebelum ${cutoffDate.toLocaleDateString('id-ID')})...`);
+  let deletedSessions = 0;
+  let deletedVouchers = 0;
+
+  // 1. Bersihkan sessions lama beserta file fotonya di Storage
+  try {
+    const oldSessionsQuery = query(
+      sessionsRef,
+      where('started_at', '<=', cutoffTimestamp)
+    );
+    const snap = await getDocs(oldSessionsQuery);
+
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data();
+      // Hapus foto di Storage jika tersimpan di Firebase Storage
+      if (data.photo_url && typeof data.photo_url === 'string' && data.photo_url.includes('firebasestorage')) {
+        try {
+          const photoRef = ref(storage, data.photo_url);
+          await deleteObject(photoRef);
+          console.log(`[Auto-Cleanup] Foto storage terhapus: ${docSnap.id}`);
+        } catch {
+          // File foto mungkin sudah terhapus, abaikan non-fatal
+        }
+      }
+      await deleteDoc(docSnap.ref);
+      deletedSessions++;
+    }
+  } catch (err) {
+    console.error('[Auto-Cleanup] Error membersihkan sessions lama:', err);
+  }
+
+  // 2. Bersihkan voucher lama yang menggantung/tidak terpakai > 30 hari
+  try {
+    const oldVouchersQuery = query(
+      vouchersRef,
+      where('created_at', '<=', cutoffTimestamp)
+    );
+    const snapVouchers = await getDocs(oldVouchersQuery);
+    for (const docSnap of snapVouchers.docs) {
+      await deleteDoc(docSnap.ref);
+      deletedVouchers++;
+    }
+  } catch (err) {
+    console.error('[Auto-Cleanup] Error membersihkan vouchers lama:', err);
+  }
+
+  if (deletedSessions > 0 || deletedVouchers > 0) {
+    console.log(`[Auto-Cleanup] Selesai: Berhasil menghapus ${deletedSessions} sesi foto lama dan ${deletedVouchers} voucher kedaluwarsa.`);
+  } else {
+    console.log('[Auto-Cleanup] Database bersih, tidak ada data berumur > 30 hari.');
+  }
+
+  return { deletedSessions, deletedVouchers };
+}

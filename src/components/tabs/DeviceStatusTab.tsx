@@ -82,62 +82,89 @@ export default function DeviceStatusTab() {
     front_camera_ready: false,
   });
   const [loading, setLoading] = useState(true);
-  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
     const unsubscribe = watchDeviceStatus((s) => {
       setStatus(s);
       setLoading(false);
-      if (s.last_updated) {
-        const date = (s.last_updated as { toDate?: () => Date }).toDate?.();
-        if (date) {
-          setLastUpdated(date.toLocaleString('id-ID', {
-            dateStyle: 'short', timeStyle: 'medium'
-          }));
-        }
-      }
     });
     return () => unsubscribe();
   }, []);
 
+  // Update timer setiap 5 detik untuk menghitung selisih heartbeat secara akurat
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 5000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Cek apakah kiosk aktif (heartbeat diterima kurang dari 60 detik yang lalu)
+  const lastMs = status.last_updated?.toMillis
+    ? status.last_updated.toMillis()
+    : (status.last_updated as any)?.toDate?.()?.getTime?.() ?? 0;
+
+  const diffSecs = lastMs > 0 ? Math.floor((now - lastMs) / 1000) : 999999;
+  const isKioskOnline = !loading && lastMs > 0 && diffSecs < 60;
+
+  let lastUpdatedText = 'Belum pernah terhubung';
+  if (lastMs > 0) {
+    if (diffSecs < 10) {
+      lastUpdatedText = 'Baru saja (< 10 detik lalu)';
+    } else if (diffSecs < 60) {
+      lastUpdatedText = `${diffSecs} detik yang lalu`;
+    } else {
+      const mins = Math.floor(diffSecs / 60);
+      lastUpdatedText = `${mins} menit yang lalu`;
+    }
+  }
+
   const indicators = [
     {
-      label: 'Firebase Connected',
-      isOnline: loading ? undefined : (status.firebase_connected ?? false),
-      icon: '🔥',
-      description: 'Koneksi ke Firebase Firestore & Storage',
+      label: 'Komputer Kiosk',
+      isOnline: loading ? undefined : isKioskOnline,
+      icon: '🖥️',
+      description: isKioskOnline ? 'Aplikasi web kiosk berjalan aktif' : 'Komputer mati atau browser kiosk ditutup',
     },
     {
-      label: 'Internet Available',
-      isOnline: loading ? undefined : (status.internet_available ?? false),
+      label: 'Koneksi Internet Kiosk',
+      isOnline: loading ? undefined : (isKioskOnline && (status.internet_available ?? false)),
       icon: '🌐',
-      description: 'Koneksi internet aktif di perangkat kios',
+      description: isKioskOnline && status.internet_available ? 'Jaringan internet di booth stabil' : 'Internet di booth terputus',
     },
     {
-      label: 'USB Camera',
-      isOnline: loading ? undefined : status.usb_camera_connected,
+      label: 'Kamera DSLR / USB',
+      isOnline: loading ? undefined : (isKioskOnline && status.usb_camera_connected),
       icon: '📷',
-      description: 'USB External Camera (UVC) terhubung',
+      description: isKioskOnline && status.usb_camera_connected ? 'Kamera Canon / USB eksternal terhubung & siap' : 'Kamera Canon / USB tidak terdeteksi',
     },
     {
-      label: 'Front Camera',
-      isOnline: loading ? undefined : status.front_camera_ready,
+      label: 'Webcam Cadangan',
+      isOnline: loading ? undefined : (isKioskOnline && status.front_camera_ready),
       icon: '🤳',
-      description: 'Kamera depan tablet siap digunakan',
+      description: isKioskOnline && status.front_camera_ready ? 'Webcam browser aktif' : 'Webcam tidak terdeteksi',
     },
     {
-      label: 'Printer',
-      isOnline: loading ? undefined : (status.printer_ready ?? false),
+      label: 'Printer Fisik',
+      isOnline: loading ? undefined : (isKioskOnline && (status.printer_ready ?? false)),
       icon: '🖨️',
-      description: 'Printer USB atau WiFi terhubung & siap',
+      description: isKioskOnline && status.printer_ready ? 'Printer USB/WiFi siap mencetak' : 'Printer offline atau bridge printer mati',
+    },
+    {
+      label: 'Koneksi Firebase Cloud',
+      isOnline: loading ? undefined : (isKioskOnline && (status.firebase_connected ?? false)),
+      icon: '🔥',
+      description: isKioskOnline && status.firebase_connected ? 'Terkoneksi ke Firestore & Storage' : 'Tidak terhubung ke Firebase',
     },
   ];
 
   const onlineCount = indicators.filter(i => i.isOnline === true).length;
   const totalCount = indicators.length;
-  const allOnline = onlineCount === totalCount;
-  const systemHealthColor = allOnline ? '#4ADE80' : onlineCount >= 3 ? '#FBBF24' : '#EF4444';
-  const systemHealthLabel = allOnline ? 'Semua Sistem Normal' : onlineCount >= 3 ? 'Ada Masalah Minor' : 'Perlu Perhatian';
+  const systemHealthColor = isKioskOnline ? (onlineCount >= 5 ? '#4ADE80' : '#FBBF24') : '#EF4444';
+  const systemHealthLabel = isKioskOnline
+    ? (onlineCount >= 5 ? 'Semua Perangkat Normal & Siap' : 'Kiosk Online (Perlu Cek Kamera/Printer)')
+    : 'Kiosk Offline / Aplikasi Belum Dibuka';
 
   return (
     <div>
@@ -146,11 +173,11 @@ export default function DeviceStatusTab() {
           Status <span className="gradient-text">Perangkat</span>
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-          Monitoring hardware kios secara real-time dari Firebase
+          Monitoring kesehatan hardware kiosk secara real-time via heartbeat Firebase
         </p>
       </div>
 
-      {/* System Health Summary */}
+      {/* System Health Summary Banner */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: '1.25rem',
         padding: '1.25rem 1.5rem', marginBottom: '1.5rem',
@@ -166,43 +193,63 @@ export default function DeviceStatusTab() {
           border: `2px solid ${systemHealthColor}40`,
           flexShrink: 0,
         }}>
-          {allOnline ? '✅' : onlineCount >= 3 ? '⚠️' : '❌'}
+          {isKioskOnline ? (onlineCount >= 5 ? '✅' : '⚠️') : '❌'}
         </div>
         <div style={{ flex: 1 }}>
           <p style={{ fontSize: '1.1rem', fontWeight: 700, color: systemHealthColor }}>
             {systemHealthLabel}
           </p>
-          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.1rem' }}>
-            {onlineCount} dari {totalCount} perangkat online
-            {lastUpdated && ` · Diperbarui: ${lastUpdated}`}
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>
+            {isKioskOnline ? `${onlineCount} dari ${totalCount} indikator aktif` : 'Tidak menerima sinyal heartbeat'}
+            {` · Heartbeat: ${lastUpdatedText}`}
           </p>
         </div>
 
-        {/* Live badge */}
+        {/* Live Badge */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.5rem',
           padding: '0.4rem 0.8rem',
-          background: 'rgba(74,222,128,0.08)',
-          border: '1px solid rgba(74,222,128,0.2)',
+          background: isKioskOnline ? 'rgba(74,222,128,0.1)' : 'rgba(239,68,68,0.1)',
+          border: `1px solid ${isKioskOnline ? 'rgba(74,222,128,0.3)' : 'rgba(239,68,68,0.3)'}`,
           borderRadius: '999px',
         }}>
           <div style={{ position: 'relative', width: '8px', height: '8px' }}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4ADE80' }} />
-            <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'rgba(74,222,128,0.5)', animation: 'ping 1.5s infinite' }} />
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: isKioskOnline ? '#4ADE80' : '#EF4444' }} />
+            {isKioskOnline && (
+              <div style={{ position: 'absolute', inset: 0, borderRadius: '50%', background: 'rgba(74,222,128,0.5)', animation: 'ping 1.5s infinite' }} />
+            )}
           </div>
-          <span style={{ fontSize: '0.72rem', color: '#4ADE80', fontWeight: 600 }}>LIVE</span>
+          <span style={{ fontSize: '0.72rem', color: isKioskOnline ? '#4ADE80' : '#EF4444', fontWeight: 700 }}>
+            {isKioskOnline ? 'LIVE' : 'OFFLINE'}
+          </span>
         </div>
       </div>
 
-      {/* Status Indicators */}
+      {/* Offline Alert Box if kiosk is not online */}
+      {!loading && !isKioskOnline && (
+        <div style={{
+          marginBottom: '1.5rem',
+          padding: '1rem 1.25rem',
+          background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.25)',
+          borderRadius: 'var(--radius-md)',
+          color: 'var(--danger)',
+          fontSize: '0.85rem',
+          lineHeight: 1.5,
+        }}>
+          <strong>⚠️ Perhatian:</strong> Mesin kiosk tidak mengirimkan data dalam 1 menit terakhir. Pastikan komputer booth menyala, terhubung ke internet, dan aplikasi web <code>sesi-jepret-customer</code> sedang dibuka.
+        </div>
+      )}
+
+      {/* Status Indicators List */}
       <div className="glass-card" style={{ padding: '1.5rem' }}>
         <h2 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '1.25rem', color: 'var(--text-primary)' }}>
-          🖥️ Status Hardware Kios
+          🖥️ Status Detail Hardware
         </h2>
 
         {loading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {[...Array(5)].map((_, i) => (
+            {[...Array(6)].map((_, i) => (
               <div key={i} style={{
                 height: '64px', borderRadius: 'var(--radius-md)',
                 background: 'rgba(255,255,255,0.03)',
@@ -218,25 +265,6 @@ export default function DeviceStatusTab() {
             ))}
           </div>
         )}
-      </div>
-
-      {/* Info */}
-      <div style={{
-        marginTop: '1rem',
-        padding: '0.875rem 1.25rem',
-        background: 'rgba(108,99,255,0.06)',
-        border: '1px solid rgba(108,99,255,0.15)',
-        borderRadius: 'var(--radius-md)',
-        display: 'flex', gap: '0.75rem', alignItems: 'flex-start',
-      }}>
-        <span style={{ fontSize: '1rem', flexShrink: 0 }}>ℹ️</span>
-        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
-          Status diperbarui secara otomatis dari aplikasi Android saat startup dan setiap kali ada perubahan koneksi USB.
-          Data disimpan di Firestore{' '}
-          <code style={{ background: 'rgba(108,99,255,0.15)', padding: '0.1rem 0.4rem', borderRadius: '4px', fontSize: '0.75rem' }}>
-            /settings/device_status
-          </code>.
-        </p>
       </div>
 
       <style>{`

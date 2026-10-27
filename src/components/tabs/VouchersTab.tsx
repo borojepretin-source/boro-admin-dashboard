@@ -12,16 +12,19 @@ import {
 export default function VouchersTab() {
   const [vouchers, setVouchers] = useState<Voucher[]>([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'active' | 'used'>('all');
   const [search, setSearch] = useState('');
   const [bulkCount, setBulkCount] = useState(5);
   const [generating, setGenerating] = useState(false);
   const [lastGenerated, setLastGenerated] = useState<string[]>([]);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const unsub = watchVouchers(
-      setVouchers,
+      (vList) => {
+        // Hanya tampilkan voucher yang belum terpakai (aktif)
+        setVouchers(vList.filter(v => !v.is_used));
+      },
       (err) => {
         if (err.message?.includes('permission')) {
           setError('Akses ditolak Firestore. Pastikan Anda sudah login sebagai admin.');
@@ -32,6 +35,12 @@ export default function VouchersTab() {
     );
     return unsub;
   }, []);
+
+  const handleCopy = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(code);
+    setTimeout(() => setCopiedCode(null), 2000);
+  };
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -88,9 +97,7 @@ export default function VouchersTab() {
   };
 
   const filtered = vouchers.filter(v => {
-    const matchFilter = filter === 'all' || (filter === 'active' ? !v.is_used : v.is_used);
-    const matchSearch = !search || v.code.includes(search.toUpperCase());
-    return matchFilter && matchSearch;
+    return !search || v.code.includes(search.toUpperCase());
   });
 
   return (
@@ -100,8 +107,27 @@ export default function VouchersTab() {
           Kelola <span className="gradient-text">Voucher</span>
         </h1>
         <p style={{ color:'var(--text-muted)', fontSize:'0.875rem' }}>
-          Generate dan kelola voucher 4-digit untuk pelanggan
+          Generate dan lihat kode 4-karakter untuk diberikan ke pelanggan kasir
         </p>
+      </div>
+
+      {/* Info notice auto-delete */}
+      <div style={{
+        marginBottom:'1.5rem',
+        padding:'0.875rem 1.25rem',
+        background:'rgba(108,99,255,0.08)',
+        border:'1px solid rgba(108,99,255,0.25)',
+        borderRadius:'var(--radius-md)',
+        display:'flex',
+        alignItems:'center',
+        gap:'0.75rem',
+        fontSize:'0.85rem',
+        color:'var(--text-secondary)',
+      }}>
+        <span style={{ fontSize:'1.2rem' }}>ℹ️</span>
+        <span>
+          <strong>Otomatis Terhapus:</strong> Begitu voucher dimasukkan dan dipakai customer di kiosk, kode akan <strong>otomatis hilang</strong> dari daftar ini secara real-time. Catatan pemakaian tersimpan di menu <strong>Riwayat Sesi</strong>.
+        </span>
       </div>
 
       {/* Error banner */}
@@ -133,7 +159,7 @@ export default function VouchersTab() {
         
         <div style={{ display:'flex', gap:'1rem', flexWrap:'wrap', alignItems:'flex-end' }}>
           {/* Single */}
-          <div style={{ flex:'1', minWidth:'160px' }}>
+          <div style={{ flex:'1', minWidth:'180px' }}>
             <button
               id="generate-single-btn"
               className="btn-primary"
@@ -153,7 +179,7 @@ export default function VouchersTab() {
               min={2} max={50}
               value={bulkCount}
               onChange={e => setBulkCount(+e.target.value)}
-              style={{ width:'80px' }}
+              style={{ width:'80px', textAlign:'center' }}
             />
             <button
               id="generate-bulk-btn"
@@ -167,22 +193,29 @@ export default function VouchersTab() {
           </div>
         </div>
 
-        {/* Last generated */}
+        {/* Last generated preview */}
         {lastGenerated.length > 0 && (
           <div style={{ marginTop:'1.25rem', padding:'1rem', background:'rgba(108,99,255,0.08)', border:'1px solid rgba(108,99,255,0.25)', borderRadius:'var(--radius-md)' }}>
             <p style={{ fontSize:'0.8rem', color:'var(--text-muted)', marginBottom:'0.5rem' }}>
-              ✅ Berhasil dibuat:
+              ✅ Kode baru siap pakai (klik untuk salin):
             </p>
             <div style={{ display:'flex', gap:'0.5rem', flexWrap:'wrap' }}>
               {lastGenerated.map(code => (
-                <span key={code} style={{
-                  fontFamily:'monospace', fontWeight:700, fontSize:'1.1rem',
-                  background:'linear-gradient(135deg, rgba(108,99,255,0.3), rgba(79,172,254,0.2))',
-                  border:'1px solid rgba(108,99,255,0.4)',
-                  padding:'0.3rem 0.75rem', borderRadius:'8px', letterSpacing:'0.15em',
-                }}>
-                  {code}
-                </span>
+                <button
+                  key={code}
+                  onClick={() => handleCopy(code)}
+                  title="Klik untuk menyalin kode"
+                  style={{
+                    fontFamily:'monospace', fontWeight:700, fontSize:'1.1rem',
+                    background: copiedCode === code ? 'rgba(74,222,128,0.2)' : 'linear-gradient(135deg, rgba(108,99,255,0.3), rgba(79,172,254,0.2))',
+                    border: `1px solid ${copiedCode === code ? '#4ADE80' : 'rgba(108,99,255,0.4)'}`,
+                    color: copiedCode === code ? '#4ADE80' : 'white',
+                    padding:'0.4rem 0.85rem', borderRadius:'8px', letterSpacing:'0.15em',
+                    cursor:'pointer', transition:'all 0.2s ease',
+                  }}
+                >
+                  {code} {copiedCode === code ? '✓' : '📋'}
+                </button>
               ))}
             </div>
           </div>
@@ -191,29 +224,16 @@ export default function VouchersTab() {
 
       {/* Voucher Table */}
       <div className="glass-card" style={{ padding:'1.5rem' }}>
-        {/* Controls */}
-        <div style={{ display:'flex', gap:'1rem', marginBottom:'1.25rem', flexWrap:'wrap', alignItems:'center' }}>
+        <div style={{ display:'flex', gap:'1rem', marginBottom:'1.25rem', flexWrap:'wrap', alignItems:'center', justifyContent:'space-between' }}>
           <input
             className="input-field"
-            placeholder="🔍 Cari kode..."
+            placeholder="🔍 Cari kode voucher..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ maxWidth:'200px' }}
+            style={{ maxWidth:'240px' }}
           />
-          <div style={{ display:'flex', gap:'0.25rem' }}>
-            {(['all','active','used'] as const).map(f => (
-              <button
-                key={f}
-                className={filter === f ? 'btn-primary' : 'btn-ghost'}
-                onClick={() => setFilter(f)}
-                style={{ padding:'0.4rem 0.85rem', fontSize:'0.8rem' }}
-              >
-                {f === 'all' ? 'Semua' : f === 'active' ? '🟢 Aktif' : '🔴 Digunakan'}
-              </button>
-            ))}
-          </div>
-          <span style={{ fontSize:'0.8rem', color:'var(--text-muted)', marginLeft:'auto' }}>
-            {filtered.length} voucher
+          <span style={{ fontSize:'0.85rem', color:'var(--text-muted)' }}>
+            <strong>{filtered.length}</strong> voucher aktif tersedia
           </span>
         </div>
 
@@ -221,33 +241,41 @@ export default function VouchersTab() {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Kode</th>
+                <th>Kode Voucher</th>
                 <th>Status</th>
-                <th>Dibuat</th>
-                <th>Digunakan</th>
-                <th>Aksi</th>
+                <th>Waktu Dibuat</th>
+                <th style={{ textAlign:'right' }}>Aksi</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(v => (
                 <tr key={v.code}>
                   <td>
-                    <span style={{ fontFamily:'monospace', fontWeight:800, fontSize:'1.1rem', letterSpacing:'0.12em', color:'white' }}>
-                      {v.code}
-                    </span>
+                    <div style={{ display:'flex', alignItems:'center', gap:'0.75rem' }}>
+                      <span style={{ fontFamily:'monospace', fontWeight:800, fontSize:'1.2rem', letterSpacing:'0.15em', color:'white' }}>
+                        {v.code}
+                      </span>
+                      <button
+                        className="btn-ghost"
+                        onClick={() => handleCopy(v.code)}
+                        style={{ fontSize:'0.75rem', padding:'0.25rem 0.5rem' }}
+                        title="Salin kode"
+                      >
+                        {copiedCode === v.code ? '✓ Tersalin' : '📋 Salin'}
+                      </button>
+                    </div>
                   </td>
                   <td>
-                    <span className={`badge ${v.is_used ? 'badge-red' : 'badge-green'}`}>
-                      {v.is_used ? '✗ Digunakan' : '✓ Aktif'}
+                    <span className="badge badge-green">
+                      ✓ Aktif / Siap Pakai
                     </span>
                   </td>
-                  <td style={{ fontSize:'0.8rem' }}>
-                    {v.created_at?.toDate?.().toLocaleDateString('id-ID') ?? '—'}
+                  <td style={{ fontSize:'0.85rem' }}>
+                    {v.created_at?.toDate
+                      ? v.created_at.toDate().toLocaleString('id-ID', { dateStyle:'medium', timeStyle:'short' })
+                      : 'Baru saja'}
                   </td>
-                  <td style={{ fontSize:'0.8rem' }}>
-                    {v.used_at?.toDate?.().toLocaleDateString('id-ID') ?? '—'}
-                  </td>
-                  <td>
+                  <td style={{ textAlign:'right' }}>
                     <button
                       className="btn-danger"
                       onClick={() => handleDelete(v.code)}
@@ -261,8 +289,8 @@ export default function VouchersTab() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5} style={{ textAlign:'center', padding:'2.5rem', color:'var(--text-muted)' }}>
-                    Tidak ada voucher ditemukan
+                  <td colSpan={4} style={{ textAlign:'center', padding:'2.5rem', color:'var(--text-muted)' }}>
+                    Tidak ada voucher aktif. Silakan buat voucher baru dengan tombol di atas.
                   </td>
                 </tr>
               )}
